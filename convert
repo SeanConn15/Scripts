@@ -1,5 +1,27 @@
 #!/bin/bash
 
+#deal with arguemnts
+output="mp4"
+directory=$(pwd)
+while getopts 'o:d:h' option; do
+    case "$option" in
+        o) 
+            output=${OPTARG}
+            ;;
+        d) 
+            directory=${OPTARG}
+            ;;
+        h) 
+            echo "Usage: $0 [-h] [-o <output format>] [-d <directory>]"
+            echo "Output format defaults to mp4, and directory to current directory"
+            exit 1;
+            ;;
+    esac
+done
+
+echo output
+echo directory
+exit 1
 #for every folder in the directory
 for D in *; do
     if [ -d "${D}" ]; then
