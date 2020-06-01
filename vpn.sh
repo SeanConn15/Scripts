@@ -31,11 +31,10 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-#execute the command to start the vpn server
 #prepend zero if needed
 if [ $(($server)) -le 9 ]; then
     server=0$server
 fi
-#argument is now just $args for some reason
+#execute the command to start the vpn server
 echo "-----USING VPN SERVER $server------"
 sudo openvpn --mute-replay-warnings --config ./configs/ipvanish-US-Chicago-chi-a$server.ovpn --auth-user-pass .auth
