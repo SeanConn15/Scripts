@@ -1,5 +1,10 @@
 #!/bin/python3
+import sys
 import os
+import getopt
+from multiprocessing import Process, Pipe
+import subprocess
+import time
 
 #TODO:
 #generic prefix for video files to specified output
@@ -8,98 +13,102 @@ import os
 #bulk renaming
 #end todo
 
-#deal with arguemnts
-input = "mkv"
-output = "mp4"
-directory = os.getcwd();
+# WHERE I LEFT OFF:
+# output is formatted, now just need to actually iterate over files, and handle ctrl+c
 
-while getopts 'o:d:h' option; do
-    case "$option" in
-        o) 
-            output=${OPTARG}
-            ;;
-        d) 
-            directory=${OPTARG}
-            ;;
-        h) 
-            echo "Usage: $0 [-h] [-i <input filetype>] [-o <output format>] [-d <directory>]"
-            echo "Output format defaults to mp4, and directory to current directory"
-            #TODO:
-            echo "if input filetype is not specified every video file found will be converted."
-            exit 1;
-            ;;
-    esac
-done
+def usage():
+        print( "Usage: $0 [-h] [-i <input filetype>] [-o <output format>] [-d <directory>]")
+        print( "Output format defaults to mp4, and directory to current directory")
+
+#deal with arguemnts
+inputFormat = "mkv"
+outputFormat = "mp4"
+directory = os.getcwd();
+try:
+    opts, args = getopt.getopt(sys.argv[1:], "hi:o:d:", ["help"])
+except getopt.GetoptError as err:
+    # print help information and exit:
+    print(err)
+    usage()
+    sys.exit(2)
+
+for o, a in opts:
+    if o == "-i":
+        inputFormat = a
+    elif o == "-o":
+        outputFormat = a
+    elif o in ("-h", "--help"):
+        usage()
+        sys.exit()
+    elif o == "-d":
+        directory = a
+    else:
+        assert False, "unhandled option"
+
 
 #print options
-echo "Converting $input to $output in $directory."
+print ("Converting {} to {} in {}.".format(inputFormat, outputFormat, directory))
 
 #change to directory
-cd "$directory"
-if [ $? -ne 0 ]; then
-    echo "directory does not exist or is not accessable" >&2
-    exit 1
-fi
-#check over execution and confirm
-#get the total count of files 
-total=0
-for F in *.$input; do
-        count=$(ls -l | grep $input | wc -l)
-        echo "In parent directory \"$(pwd)\": $count files to convert"
-        total=$(($total + count))
-done
-# go into every directory
-for D in *; do
-    if [ -d "${D}" ]; then
-        cd "${D}"
-        #count the files to convert
-        count=$(ls -l | grep $input | wc -l)
-        echo "In directory \"${D}\": $count files to convert"
-        total=$(($total + count))
-        cd ..
-   fi
-done
-echo
-echo "Total files to convert: $total"
+try:
+    os.chdir(directory);
+except:
+    print("directory does not exist or is not accessable")
+    sys.exit(2)
 
-echo -n "Continue? [y/N] "
-read ans
-if [ "$ans" != "y" -a "$ans" != "Y" ]; then exit 1; fi;
+# get list of files to be converted
+# get list of directories
+seasons = [ f.path for f in os.scandir() if f.is_dir() ]
+# for each directory
+total = len([ f.path for f in os.scandir() if not f.is_dir() and inputFormat in f.name ])
+print ("In parent directory, {} files.".format(total))
+
+for season in seasons:
+    #count the files
+    fnum = len([ f.path for f in os.scandir(season) if not f.is_dir and inputFormat in f.name])
+    print ("In directory {}, {} episodes.".format(season, fnum))
+    total += fnum
+print ("In total, {} episodes.".format(total))
+
+ans = input("Do you want to continue? [y/N] ")
+if ans != "y" and ans != "Y":
+    print ("Exiting.")
+    sys.exit(2)
 
 
-#for every folder in the directory
-for D in *; do
-    if [ -d "${D}" ]; then
-        #enter the folder
-        cd "${D}"
-        #for every file in the directory with .avi
-        for F in *.$input; do
-            #if the mp4 does not already exist
-            if [ !  -f "${F%%.$input}.$output" ]; then
-                SECONDS=0
-                echo "converting ${F%%.$input}"
-                #ffmpeg convert to mp4
-                #ffmpeg -i "${F}" "${F%%.$input}.$output" &> /dev/null
-                echo "ffmpeg -i "${F}" "${F%%.$input}.$output" &> /dev/null"
-                echo "done, took $SECONDS seconds."
+def convert():
+    #remove old log file
+    if (os.path.isfile("./progressfile")):
+        os.remove("./progressfile")
+    #create a new log file
+    f = open("./progressfile", "x");
+    f.close()
+    #run the ffmpeg process
+    start = time.time()
+    p = subprocess.Popen(['ffmpeg', '-y', '-i', 'adventure.mkv', '-progress', './progressfile', 'adventure.mp4'], stderr=subprocess.DEVNULL);
+    print ("wassup")
+    #print out the status of ffmpeg in a not stupid way
+    done = overseer(p)
+    #print statistcs when done
+    print ("Done. Took {} s.".format(done-start))
 
-            fi
-            #clear
-            #echo "done with file"
-        done
-        #exit the folder
-        cd ..
-    fi
-done
-#for evey file in the parent directory
-for F in *.avi; do
-    #if the mp4 does not already exist
-    if [ !  -f "${F%%.avi}.mp4" ]; then
-        #ffmpeg convert to mp4
-        echo "done"
-    fi
-    #clear
-    #echo "done with file"
-done
-#print done
-echo "done"
+
+def overseer(p):
+    #open the old log file
+    logf = open("./progressfile", "r");
+    # while the conversion is still alive
+    while p.poll() is None:
+        line = logf.readline()
+        if line:
+            if "speed=" in line:
+                sys.stdout.write("\r")
+                print ("{}".format(line.rstrip()), end="")
+    print ()
+    return time.time()
+        
+
+
+#convert every video in the parent directory
+convert()
+#for every season
+    #convert every video
