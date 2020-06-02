@@ -1,0 +1,114 @@
+#!/bin/python3
+import sys
+import os
+import getopt
+from multiprocessing import Process, Pipe
+import subprocess
+import time
+
+#TODO:
+#generic prefix for video files to specified output
+#fancy status dsiplay
+#job control and resumption
+#bulk renaming
+#end todo
+
+# WHERE I LEFT OFF:
+# output is formatted, now just need to actually iterate over files, and handle ctrl+c
+
+def usage():
+        print( "Usage: $0 [-h] [-i <input filetype>] [-o <output format>] [-d <directory>]")
+        print( "Output format defaults to mp4, and directory to current directory")
+
+#deal with arguemnts
+inputFormat = "mkv"
+outputFormat = "mp4"
+directory = os.getcwd();
+try:
+    opts, args = getopt.getopt(sys.argv[1:], "hi:o:d:", ["help"])
+except getopt.GetoptError as err:
+    # print help information and exit:
+    print(err)
+    usage()
+    sys.exit(2)
+
+for o, a in opts:
+    if o == "-i":
+        inputFormat = a
+    elif o == "-o":
+        outputFormat = a
+    elif o in ("-h", "--help"):
+        usage()
+        sys.exit()
+    elif o == "-d":
+        directory = a
+    else:
+        assert False, "unhandled option"
+
+
+#print options
+print ("Converting {} to {} in {}.".format(inputFormat, outputFormat, directory))
+
+#change to directory
+try:
+    os.chdir(directory);
+except:
+    print("directory does not exist or is not accessable")
+    sys.exit(2)
+
+# get list of files to be converted
+# get list of directories
+seasons = [ f.path for f in os.scandir() if f.is_dir() ]
+# for each directory
+total = len([ f.path for f in os.scandir() if not f.is_dir() and inputFormat in f.name ])
+print ("In parent directory, {} files.".format(total))
+
+for season in seasons:
+    #count the files
+    fnum = len([ f.path for f in os.scandir(season) if not f.is_dir and inputFormat in f.name])
+    print ("In directory {}, {} episodes.".format(season, fnum))
+    total += fnum
+print ("In total, {} episodes.".format(total))
+
+ans = input("Do you want to continue? [y/N] ")
+if ans != "y" and ans != "Y":
+    print ("Exiting.")
+    sys.exit(2)
+
+
+def convert():
+    #remove old log file
+    if (os.path.isfile("./progressfile")):
+        os.remove("./progressfile")
+    #create a new log file
+    f = open("./progressfile", "x");
+    f.close()
+    #run the ffmpeg process
+    start = time.time()
+    p = subprocess.Popen(['ffmpeg', '-y', '-i', 'adventure.mkv', '-progress', './progressfile', 'adventure.mp4'], stderr=subprocess.DEVNULL);
+    print ("wassup")
+    #print out the status of ffmpeg in a not stupid way
+    done = overseer(p)
+    #print statistcs when done
+    print ("Done. Took {} s.".format(done-start))
+
+
+def overseer(p):
+    #open the old log file
+    logf = open("./progressfile", "r");
+    # while the conversion is still alive
+    while p.poll() is None:
+        line = logf.readline()
+        if line:
+            if "speed=" in line:
+                sys.stdout.write("\r")
+                print ("{}".format(line.rstrip()), end="")
+    print ()
+    return time.time()
+        
+
+
+#convert every video in the parent directory
+convert()
+#for every season
+    #convert every video

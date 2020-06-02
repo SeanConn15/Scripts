@@ -1,8 +1,18 @@
-#!/bin/bash
+#!/bin/python3
+import os
+
+#TODO:
+#generic prefix for video files to specified output
+#fancy status dsiplay
+#job control and resumption
+#bulk renaming
+#end todo
 
 #deal with arguemnts
-output="mp4"
-directory=$(pwd)
+input = "mkv"
+output = "mp4"
+directory = os.getcwd();
+
 while getopts 'o:d:h' option; do
     case "$option" in
         o) 
@@ -12,30 +22,65 @@ while getopts 'o:d:h' option; do
             directory=${OPTARG}
             ;;
         h) 
-            echo "Usage: $0 [-h] [-o <output format>] [-d <directory>]"
+            echo "Usage: $0 [-h] [-i <input filetype>] [-o <output format>] [-d <directory>]"
             echo "Output format defaults to mp4, and directory to current directory"
+            #TODO:
+            echo "if input filetype is not specified every video file found will be converted."
             exit 1;
             ;;
     esac
 done
 
-echo output
-echo directory
-exit 1
+#print options
+echo "Converting $input to $output in $directory."
+
+#change to directory
+cd "$directory"
+if [ $? -ne 0 ]; then
+    echo "directory does not exist or is not accessable" >&2
+    exit 1
+fi
+#check over execution and confirm
+#get the total count of files 
+total=0
+for F in *.$input; do
+        count=$(ls -l | grep $input | wc -l)
+        echo "In parent directory \"$(pwd)\": $count files to convert"
+        total=$(($total + count))
+done
+# go into every directory
+for D in *; do
+    if [ -d "${D}" ]; then
+        cd "${D}"
+        #count the files to convert
+        count=$(ls -l | grep $input | wc -l)
+        echo "In directory \"${D}\": $count files to convert"
+        total=$(($total + count))
+        cd ..
+   fi
+done
+echo
+echo "Total files to convert: $total"
+
+echo -n "Continue? [y/N] "
+read ans
+if [ "$ans" != "y" -a "$ans" != "Y" ]; then exit 1; fi;
+
+
 #for every folder in the directory
 for D in *; do
     if [ -d "${D}" ]; then
         #enter the folder
         cd "${D}"
         #for every file in the directory with .avi
-        for F in *.avi; do
+        for F in *.$input; do
             #if the mp4 does not already exist
-            if [ !  -f "${F%%.avi}.mp4" ]; then
-                #print what you are doing
+            if [ !  -f "${F%%.$input}.$output" ]; then
                 SECONDS=0
-                echo "converting ${F%%.avi}"
+                echo "converting ${F%%.$input}"
                 #ffmpeg convert to mp4
-                ffmpeg -i "${F}" "${F%%.avi}.mp4" &> /dev/null
+                #ffmpeg -i "${F}" "${F%%.$input}.$output" &> /dev/null
+                echo "ffmpeg -i "${F}" "${F%%.$input}.$output" &> /dev/null"
                 echo "done, took $SECONDS seconds."
 
             fi
@@ -50,9 +95,7 @@ done
 for F in *.avi; do
     #if the mp4 does not already exist
     if [ !  -f "${F%%.avi}.mp4" ]; then
-        echo "converting ${F%%.avi}"
         #ffmpeg convert to mp4
-        ffmpeg -i "${F}" "${F%%.avi}.mp4" &> /dev/null
         echo "done"
     fi
     #clear
