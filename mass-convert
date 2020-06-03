@@ -60,12 +60,12 @@ except:
 # get list of directories
 seasons = [ f.path for f in os.scandir() if f.is_dir() ]
 # for each directory
-total = len([ f.path for f in os.scandir() if not f.is_dir() and inputFormat in f.name ])
+total = len([ f.path for f in os.scandir() if inputFormat in f.name ])
 print ("In parent directory, {} files.".format(total))
 
 for season in seasons:
     #count the files
-    fnum = len([ f.path for f in os.scandir(season) if not f.is_dir and inputFormat in f.name])
+    fnum = len([ f.path for f in os.scandir(season) if inputFormat in f.name])
     print ("In directory {}, {} episodes.".format(season, fnum))
     total += fnum
 print ("In total, {} episodes.".format(total))
@@ -76,39 +76,65 @@ if ans != "y" and ans != "Y":
     sys.exit(2)
 
 
-def convert():
+
+
+
+def convert(inputFilename, outputFilename):
     #remove old log file
     if (os.path.isfile("./progressfile")):
         os.remove("./progressfile")
     #create a new log file
-    f = open("./progressfile", "x");
+    f = open("./progressfile", "x")
     f.close()
     #run the ffmpeg process
     start = time.time()
-    p = subprocess.Popen(['ffmpeg', '-y', '-i', 'adventure.mkv', '-progress', './progressfile', 'adventure.mp4'], stderr=subprocess.DEVNULL);
-    print ("wassup")
+    p = subprocess.Popen(['ffmpeg', '-y', '-i', inputFilename, '-progress', './progressfile', outputFilename], stderr=subprocess.DEVNULL);
+    #print ("ffmpeg -y -i {} -progress ./progressfile {}".format( inputFilename, outputFilename));
     #print out the status of ffmpeg in a not stupid way
-    done = overseer(p)
+    done = overseer(p, inputFilename)
     #print statistcs when done
     print ("Done. Took {} s.".format(done-start))
+    os.remove("./progressfile")
 
 
-def overseer(p):
+def overseer(p, inputFilename):
     #open the old log file
     logf = open("./progressfile", "r");
+    #get the filesize
+    size = os.path.getsize(inputFilename)
+    #convert to KB
+    size = size/1024
+    print (size)
     # while the conversion is still alive
     while p.poll() is None:
         line = logf.readline()
         if line:
-            if "speed=" in line:
+            #generate an eta for the file
+            #get the bitrate
+            if "bitrate=" in line:
+                #covnert it to a number
+                bitrate = float(line[8:-8])
+            if "total_size=" in line:
+                total_size = int(line[11:])
+                print(total_size)
+                print(bitrate)
+                print(size - total_size)
+                print("{} seconds. ".format((size - total_size)/bitrate))
                 sys.stdout.write("\r")
-                print ("{}".format(line.rstrip()), end="")
+                #print ("{}".format(line.rstrip()), end="")
     print ()
     return time.time()
         
 
 
-#convert every video in the parent directory
-convert()
-#for every season
-    #convert every video
+#now actually go through and do the conversion
+for season in seasons:
+    #go to season directory
+    os.chdir(season)
+    #print(os.getcwd())
+    episodes = [ f.path for f in os.scandir() if f.name.endswith(inputFormat)]
+    for episode in episodes:
+        #the input is the episode, the output is the episode with the new ending
+        convert(episode, episode[:-len(inputFormat)] + outputFormat);
+    print("--")
+    os.chdir(directory)
