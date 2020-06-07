@@ -5,12 +5,14 @@ import getopt
 from multiprocessing import Process, Pipe
 import subprocess
 import time
+import math
 
 #TODO:
 #generic prefix for video files to specified output
 #fancy status dsiplay
-#job control and resumption
-#bulk renaming
+#job control 
+#resumption and suspension
+#bulk folder renaming
 #end todo
 
 # WHERE I LEFT OFF:
@@ -21,60 +23,83 @@ def usage():
         print( "Output format defaults to mp4, and directory to current directory")
 
 #deal with arguemnts
-inputFormat = "mkv"
-outputFormat = "mp4"
-directory = os.getcwd();
-try:
-    opts, args = getopt.getopt(sys.argv[1:], "hi:o:d:", ["help"])
-except getopt.GetoptError as err:
-    # print help information and exit:
-    print(err)
-    usage()
-    sys.exit(2)
-
-for o, a in opts:
-    if o == "-i":
-        inputFormat = a
-    elif o == "-o":
-        outputFormat = a
-    elif o in ("-h", "--help"):
+def main():
+    inputFormat = "mkv"
+    outputFormat = "mp4"
+    directory = os.getcwd();
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "hi:o:d:", ["help"])
+    except getopt.GetoptError as err:
+        # print help information and exit:
+        print(err)
         usage()
-        sys.exit()
-    elif o == "-d":
-        directory = a
-    else:
-        assert False, "unhandled option"
+        sys.exit(2)
+
+    for o, a in opts:
+        if o == "-i":
+            inputFormat = a
+        elif o == "-o":
+            outputFormat = a
+        elif o in ("-h", "--help"):
+            usage()
+            sys.exit()
+        elif o == "-d":
+            directory = a
+        else:
+            assert False, "unhandled option"
 
 
-#print options
-print ("Converting {} to {} in {}.".format(inputFormat, outputFormat, directory))
+    #print options
+    print ("Converting {} to {} in {}.".format(inputFormat, outputFormat, directory))
 
-#change to directory
-try:
-    os.chdir(directory);
-except:
-    print("directory does not exist or is not accessable")
-    sys.exit(2)
+    #change to directory
+    try:
+        os.chdir(directory);
+    except:
+        print("directory does not exist or is not accessable")
+        sys.exit(2)
 
-# get list of files to be converted
-# get list of directories
-seasons = [ f.path for f in os.scandir() if f.is_dir() ]
-# for each directory
-total = len([ f.path for f in os.scandir() if inputFormat in f.name ])
-print ("In parent directory, {} files.".format(total))
+    # get list of files to be converted
+    # get list of directories
+    seasons = [ f.path for f in os.scandir() if f.is_dir() ]
+    # for each directory
+    total = len([ f.path for f in os.scandir() if inputFormat in f.name ])
+    print ("In parent directory, {} files.".format(total))
 
-for season in seasons:
-    #count the files
-    fnum = len([ f.path for f in os.scandir(season) if inputFormat in f.name])
-    print ("In directory {}, {} episodes.".format(season, fnum))
-    total += fnum
-print ("In total, {} episodes.".format(total))
+    for season in seasons:
+        #count the files
+        fnum = len([ f.path for f in os.scandir(season) if inputFormat in f.name])
+        print ("In directory {}, {} episodes.".format(season, fnum))
+        total += fnum
+    print ("In total, {} episodes.".format(total))
 
-ans = input("Do you want to continue? [y/N] ")
-if ans != "y" and ans != "Y":
-    print ("Exiting.")
-    sys.exit(2)
+    ans = input("Do you want to continue? [y/N] ")
+    if ans != "y" and ans != "Y":
+        print ("Exiting.")
+        sys.exit(2)
 
+    print()
+    print()
+    print()
+
+    for season in seasons:
+        #go to season directory
+        os.chdir(season)
+        #print(os.getcwd())
+        episodes = [ f.path for f in os.scandir() if f.name.endswith(inputFormat)]
+        for episode in episodes:
+            #the input is the episode, the output is the episode with the new ending
+            convert(episode, episode[:-len(inputFormat)] + outputFormat);
+        print("--")
+        os.chdir(directory)
+
+    #do the parent directory conversion too
+    episodes = [ f.path for f in os.scandir() if f.name.endswith(inputFormat)]
+    for episode in episodes:
+        #the input is the episode, the output is the episode with the new ending
+        convert(episode, episode[:-len(inputFormat)] + outputFormat);
+    print("--")
+    print("done.")
 
 
 
@@ -88,53 +113,138 @@ def convert(inputFilename, outputFilename):
     f.close()
     #run the ffmpeg process
     start = time.time()
-    p = subprocess.Popen(['ffmpeg', '-y', '-i', inputFilename, '-progress', './progressfile', outputFilename], stderr=subprocess.DEVNULL);
+    p = subprocess.Popen(['ffmpeg', '-y', '-i', inputFilename, '-progress', './progressfile', outputFilename], stderr=subprocess.PIPE);
+    #read the output of the program, wait for the Duration line
+    line = p.stderr.readline().decode("utf-8")
+    while "Duration:" not in line:
+        line = p.stderr.readline().decode("utf-8")
+
+    #convert the line to the time in seconds
+    line = line[12:23]
+    hours = int(line[:2])
+    minutes = int(line[3:5])
+    #I dont care about the decimal after seconds, this is for an estimation anyways
+    seconds = int(line[6:8])
+    total_time = (hours * 60 * 60) + (minutes * 60) + (seconds)
+
     #print ("ffmpeg -y -i {} -progress ./progressfile {}".format( inputFilename, outputFilename));
     #print out the status of ffmpeg in a not stupid way
-    done = overseer(p, inputFilename)
+    done = overseer(p, inputFilename, total_time)
     #print statistcs when done
-    print ("Done. Took {} s.".format(done-start))
     os.remove("./progressfile")
 
 
-def overseer(p, inputFilename):
+def overseer(p, inputFilename, total_time):
+    print ("Converting :{}".format(inputFilename))
     #open the old log file
     logf = open("./progressfile", "r");
-    #get the filesize
-    size = os.path.getsize(inputFilename)
-    #convert to KB
-    size = size/1024
-    print (size)
+    start_time = time.time()
     # while the conversion is still alive
     while p.poll() is None:
+        #find time_ms
         line = logf.readline()
-        if line:
-            #generate an eta for the file
-            #get the bitrate
-            if "bitrate=" in line:
-                #covnert it to a number
-                bitrate = float(line[8:-8])
-            if "total_size=" in line:
-                total_size = int(line[11:])
-                print(total_size)
-                print(bitrate)
-                print(size - total_size)
-                print("{} seconds. ".format((size - total_size)/bitrate))
-                sys.stdout.write("\r")
-                #print ("{}".format(line.rstrip()), end="")
-    print ()
-    return time.time()
+        while "out_time=" not in line:
+            line = logf.readline()
+
+        #set the variable
+        #the -1 gets rid of the newline at the end
+        #convert the line to the time in seconds
+        line = line[9:]
+        hours = int(line[:2])
+        minutes = int(line[3:5])
+        #I dont care about the decimal after seconds, this is for an estimation anyways
+        seconds = int(line[6:8])
+        curr_time = (hours * 60 * 60) + (minutes * 60) + (seconds)
+
+        #find speed
+        while "speed=" not in line:
+            line = logf.readline()
+        speed = float(line[6:-2])
+        
+        #get the percent done
+        percent_done = 1 - ((total_time - curr_time)/total_time)
+
+        percent_done *= 100
+        #get the eta, in seconds
+        eta = (total_time - curr_time)/speed
+        #dont ask about this
+        percent_done *= 2
+        eta -= 60
+        #print output from this information
+        print ("\r{}".format(progressbar(percent_done, speed, eta)), end="")
+        #sleep for two seconds
+        time.sleep(1)
+
+    #print the donebar
+    print ("\r{}".format(donebar(time.time() - start_time)))
         
 
+#main()
 
-#now actually go through and do the conversion
-for season in seasons:
-    #go to season directory
-    os.chdir(season)
-    #print(os.getcwd())
-    episodes = [ f.path for f in os.scandir() if f.name.endswith(inputFormat)]
-    for episode in episodes:
-        #the input is the episode, the output is the episode with the new ending
-        convert(episode, episode[:-len(inputFormat)] + outputFormat);
-    print("--")
-    os.chdir(directory)
+#returns a fancy looking progressbar when given a percent and an eta (in seconds)
+def progressbar(percent, speed, eta):
+    #TODO: terminal width less than will fit
+    rows, columns = os.popen('stty size', 'r').read().split()
+    days = math.floor(eta/60/60/24)
+    hours = math.floor((eta % (60 * 60 * 24))/60/60)
+    minutes = math.floor((eta % (60 * 60))/60)
+    seconds = math.floor((eta % 60))
+
+    ret = "speed: {:>7.2f}    eta: {:0>2}d, {:0>2}h, {:0>2}m, {:0>2}s   ".format(speed, days, hours, minutes, seconds)
+
+    #number at the end comes from:  ' [' , '] ', ' 100%'
+    progressbar_width = int(columns) - len(ret) - 9
+    if percent == 0:
+        num_hash = 0
+    else:
+        num_hash = math.floor(progressbar_width * (percent/100))
+
+    ret += " ["
+    for i in range(1,progressbar_width):
+        if (i < num_hash):
+            ret += "#"
+        else:
+            ret += "-"
+    ret += "] {:>3}%".format(math.floor(percent));
+
+
+    return ret
+
+
+#returns a bar that looks like the progressbar, but prints statistics about how long it tooks
+def donebar(total_time):
+    rows, columns = os.popen('stty size', 'r').read().split()
+    days = math.floor(total_time/60/60/24)
+    hours = math.floor((total_time % (60 * 60 * 24))/60/60)
+    minutes = math.floor((total_time % (60 * 60))/60)
+    seconds = math.floor((total_time % 60))
+
+    ret = "Done!     Total time: {:0>2}d, {:0>2}h, {:0>2}m, {:0>2}s    ".format(days, hours, minutes, seconds)
+
+    #number at the end comes from:  ' [' , '] ', ' 100%'
+    progressbar_width = int(columns) - len(ret) - 9
+    ret += " ["
+    for i in range(1,progressbar_width):
+        ret += "#"
+    ret += "] 100%";
+
+
+    return ret
+
+'''
+progress = 0
+print ("Example filename here!!!")
+while progress <= 100:
+    time.sleep(0.03)
+    print ("\r{}".format(progressbar(progress)), end="")
+    progress += 1
+print()
+print ("Example filename here!!!")
+progress = 0
+while progress <= 100:
+    time.sleep(0.03)
+    print ("\r{}".format(progressbar(progress)), end="")
+    progress += 1
+'''
+
+main()
