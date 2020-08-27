@@ -9,21 +9,25 @@ import math
 
 #TODO:
 #generic prefix for video files to specified output
-#fancy status dsiplay
-#job control 
+#fancy status dsiplay x
+#job control x
 #resumption and suspension
-#bulk folder renaming
 #end todo
 
-# WHERE I LEFT OFF:
-# output is formatted, now just need to actually iterate over files, and handle ctrl+c
+# global variables
+#total number of episodes to convert
+total = 0;
+#current epsiode being converted
+current = 0;
 
 def usage():
-        print( "Usage: $0 [-h] [-i <input filetype>] [-o <output format>] [-d <directory>]")
+        print( "Usage: mass-convert [-h] [-i <input format>] [-o <output format>] [-d <directory>]")
         print( "Output format defaults to mp4, and directory to current directory")
 
 #deal with arguemnts
 def main():
+    global total
+    global current
     inputFormat = "mkv"
     outputFormat = "mp4"
     directory = os.getcwd();
@@ -90,6 +94,7 @@ def main():
         for episode in episodes:
             #the input is the episode, the output is the episode with the new ending
             convert(episode, episode[:-len(inputFormat)] + outputFormat);
+            current += 1
         print("--")
         os.chdir(directory)
 
@@ -136,9 +141,17 @@ def convert(inputFilename, outputFilename):
 
 def overseer(p, inputFilename, total_time):
     print ("Converting :{}".format(inputFilename))
+    print ()
     #open the old log file
     logf = open("./progressfile", "r");
     start_time = time.time()
+    #this is for the total eta estimation, circular buffer of last 40 estimations
+    recent_eta_list = []
+    #am I too used to C? No, its the kids who are wrong
+    for x in range(40):
+        recent_eta_list.append(0)
+
+    eta_list_iterator = 0;
     # while the conversion is still alive
     while p.poll() is None:
         #find time_ms
@@ -170,27 +183,54 @@ def overseer(p, inputFilename, total_time):
         #dont ask about this
         percent_done *= 2
         eta -= 60
+
+        #get estimated total video time left
+        remaining_episodes = total - current
+        remaining_time = remaining_episodes * (total_time/speed) + eta
+        recent_eta_list[eta_list_iterator] = remaining_time
+        eta_list_iterator += 1
+        eta_list_iterator %= 40
+        remaining_time = arrayAvg(recent_eta_list)
+
+        t = secToDays(remaining_time)
+
+        print ("\033[A\rTotal eta: {:0>2}d, {:0>2}h, {:0>2}m, {:0>2}s   ".format(t[0], t[1], t[2], t[3]))
+        #print total conversion time estimation
+
         #print output from this information
         print ("\r{}".format(progressbar(percent_done, speed, eta)), end="")
         #sleep for two seconds
         time.sleep(1)
 
+    # get exit status of conversion
+    if p.returncode != 0:
+        print()
+        sys.stderr.write("Error! Conversion returned failure code {}. Exiting.".format(p.returncode))
+        sys.exit(1)
+
+
     #print the donebar
     print ("\r{}".format(donebar(time.time() - start_time)))
         
 
-#main()
+
+#get the average of an array, ignoring zeros
+def arrayAvg(arr):
+    count = 0
+    total = 0
+    for i in range(0, len(arr)):
+        if arr[i] != 0:
+            count += 1
+            total += arr[i]
+    return total/count
 
 #returns a fancy looking progressbar when given a percent and an eta (in seconds)
 def progressbar(percent, speed, eta):
     #TODO: terminal width less than will fit
     rows, columns = os.popen('stty size', 'r').read().split()
-    days = math.floor(eta/60/60/24)
-    hours = math.floor((eta % (60 * 60 * 24))/60/60)
-    minutes = math.floor((eta % (60 * 60))/60)
-    seconds = math.floor((eta % 60))
+    t = secToDays(eta)
 
-    ret = "speed: {:>7.2f}    eta: {:0>2}d, {:0>2}h, {:0>2}m, {:0>2}s   ".format(speed, days, hours, minutes, seconds)
+    ret = "speed: {:>7.2f}    eta: {:0>2}d, {:0>2}h, {:0>2}m, {:0>2}s   ".format(speed, t[0], t[1], t[2], t[3])
 
     #number at the end comes from:  ' [' , '] ', ' 100%'
     progressbar_width = int(columns) - len(ret) - 9
@@ -210,8 +250,24 @@ def progressbar(percent, speed, eta):
 
     return ret
 
+def secToDays(seconds):
+    ret = []
+    #days
+    ret.append(math.floor(seconds/60/60/24))
+    #hours
+    ret.append(math.floor((seconds % (60 * 60 * 24))/60/60))
+    #minutes
+    ret.append(math.floor((seconds % (60 * 60))/60))
+    #seconds
+    ret.append(math.floor((seconds % 60)))
+    return ret
+           
+           
+           
 
-#returns a bar that looks like the progressbar, but prints statistics about how long it tooks
+
+#returns a bar that looks like the progressbar, but prints statistics about how long it took
+#used after the progressbar completes
 def donebar(total_time):
     rows, columns = os.popen('stty size', 'r').read().split()
     days = math.floor(total_time/60/60/24)
